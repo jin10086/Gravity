@@ -1512,10 +1512,12 @@ export class World {
       this.makeLabel('Low tide', 'vec-label'), this.makeLabel('Low tide', 'vec-label'),
     ];
     for (const l of this.tideRegionLabels) g.add(l);
-    // A "city" riding Earth's surface, with a water column whose height tracks
-    // the tide it's currently under — so one spin = two highs and two lows.
-    this.tideCity = new Mesh(new SphereGeometry(0.2, 12, 12), new MeshBasicMaterial({ color: 0xffd24a }));
-    g.add(this.tideCity);
+    // A "city" fixed to Earth's surface — a child of the Earth mesh so it turns
+    // with the planet's spin. Sitting just above the surface avoids z-fighting
+    // (the blinking). One spin carries it through two highs and two lows.
+    this.tideCity = new Mesh(new SphereGeometry(0.26, 16, 16), new MeshBasicMaterial({ color: 0xffd24a }));
+    this.tideCity.position.set(0, 0, eR + 0.14);
+    this.tideEarth.add(this.tideCity);
     this.tideColumn = new Line(new BufferGeometry().setFromPoints([new Vector3(), new Vector3()]),
       new LineBasicMaterial({ color: 0x6ad6ff, transparent: true, opacity: 0.95 }));
     g.add(this.tideColumn);
@@ -2140,14 +2142,14 @@ export class World {
       this.tideRegionLabels[1].position.copy(moonDir).multiplyScalar(-(aX + 1.4));
       this.tideRegionLabels[2].position.copy(perpDir).multiplyScalar(eR + 1.2);
       this.tideRegionLabels[3].position.copy(perpDir).multiplyScalar(-(eR + 1.2));
-      // City rides Earth's daily spin; water rises as it turns toward the Moon
-      // axis (high tide) and drops between (low tide).
-      const cityDir = new Vector3(Math.cos(this.tideSpin), 0, Math.sin(this.tideSpin));
+      // The city is a child of Earth, so its world direction follows the spin
+      // (local +Z under rotation.y=tideSpin → (sin, 0, cos)). Water above it
+      // rises as it turns toward the Moon axis (high tide), drops between (low).
+      const cityDir = new Vector3(Math.sin(this.tideSpin), 0, Math.cos(this.tideSpin));
       const cosA = cityDir.dot(moonDir), sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
       const waterR = 1 / Math.sqrt((cosA / aX) ** 2 + (sinA / bZ) ** 2);
       const base = cityDir.clone().multiplyScalar(eR);
       const top = cityDir.clone().multiplyScalar(waterR);
-      this.tideCity.position.copy(base);
       const arr = (this.tideColumn.geometry.getAttribute('position') as Float32BufferAttribute).array as Float32Array;
       arr[0] = base.x; arr[1] = 0; arr[2] = base.z; arr[3] = top.x; arr[4] = 0; arr[5] = top.z;
       (this.tideColumn.geometry.getAttribute('position') as Float32BufferAttribute).needsUpdate = true;
