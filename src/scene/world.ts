@@ -104,6 +104,7 @@ export class World {
   private views: BodyView[] = [];
   private moonViews: MoonView[] = [];
   private scale: ScaleModel;
+  private moonSizeMul = 1; // per-slide visual exaggeration of moon radius (tidal-lock demo)
 
   private nbody!: NBody;
   private simBodies: SimDescriptor[] = [];
@@ -567,7 +568,7 @@ export class World {
         // on the night side too.
         if (moon.id === 'moon') {
           const marker = new Mesh(
-            new SphereGeometry(0.22, 16, 16),
+            new SphereGeometry(0.13, 16, 16),
             new MeshBasicMaterial({ color: 0xffb84a }),
           );
           marker.position.set(0, 0, 1); // surface point on the near side (unit sphere)
@@ -900,9 +901,17 @@ export class World {
       }
     }
     for (const mv of this.moonViews) {
-      mv.mesh.scale.setScalar(this.scale.bodyRadius(mv.moon.radius, false));
+      mv.mesh.scale.setScalar(this.scale.bodyRadius(mv.moon.radius, false) * this.moonSizeMul);
     }
     this.rebuildOrbits();
+  }
+
+  /** Visually exaggerate the Moon's size (1 = real). Used to make tidal lock readable. */
+  setMoonSize(mul: number): void {
+    this.moonSizeMul = mul;
+    for (const mv of this.moonViews) {
+      mv.mesh.scale.setScalar(this.scale.bodyRadius(mv.moon.radius, false) * mul);
+    }
   }
 
   setPhysics(mode: PhysicsMode): void {

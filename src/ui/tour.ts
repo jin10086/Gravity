@@ -24,6 +24,7 @@ export interface TourStep {
   axes?: boolean;       // draw rotation-axis lines
   moonLabels?: boolean; // show moon name labels (default true)
   moonNearSide?: boolean; // mark the Moon's Earth-facing side (tidal-lock demo)
+  moonSize?: number;      // visual exaggeration of the Moon's radius (default 1)
   daysPerSecond: number;
   visible: string[] | null;
   vectors?: { velocity?: boolean; gravity?: boolean; mutual?: boolean; tangent?: boolean };
@@ -184,7 +185,7 @@ export const STEPS: TourStep[] = [
       'Switch Physics to “N-body” in the panel later to watch the Moon tug back and both bodies swing around their shared barycenter.',
     scale: 'visual', physics: 'kepler', twoD: true, demo: 'normal',
     showMoons: true, showOrbits: true, showProjection: false, spin: false, daysPerSecond: 4,
-    moonNearSide: true,
+    moonNearSide: true, moonSize: 3,
     visible: ['sun', 'earth', 'moon'], focus: 'earth', focusMul: 16, follow: true, followRaise: 0,
   },
   {
@@ -612,6 +613,8 @@ export class Tour {
     st.vecAll = false;
     st.vecSun = false;
     this.world.setAutoRotate(false);
+    this.world.setMoonNearSide(false);
+    this.world.setMoonSize(1); // drop any tidal-lock exaggeration
     st.showSpin = true;   // free-explore: bodies rotate
     st.showAxes = false;
     st.showMoonLabels = true;
@@ -749,6 +752,7 @@ export class Tour {
     w.state.vecAll = !!step.vecAll;
     w.state.vecSun = !!step.vecSun;
     w.setMoonNearSide(!!step.moonNearSide, UI[this.lang].nearSide);
+    w.setMoonSize(step.moonSize ?? 1);
     w.setAutoRotate(!!step.autoRotate);
     w.setCameraReturn(true); // on every tour slide, releasing the mouse eases back to the framing
     w.setZoomEnabled(false);  // no wheel-zoom during the guided tour
