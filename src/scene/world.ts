@@ -279,7 +279,9 @@ export class World {
   private tideRegionLabels: CSS2DObject[] = []; // [high, high, low, low]
   // Side-view coastline diorama, rendered as a 3-D inset (its own scene/camera).
   private tidePanel!: HTMLElement; private tideLabel2D!: Element;
-  private dioramaScene!: Scene; private dioramaCam!: PerspectiveCamera; private dioramaWater!: Mesh;
+  private dioramaScene!: Scene; private dioramaCam!: PerspectiveCamera; private dioramaWater!: Mesh; private dioramaDot!: Mesh;
+  // Tide-height-vs-time graph (spring/neap beat) with a tracing marker.
+  private tideGraph!: HTMLElement; private tideGraphDot!: SVGCircleElement; private tideClock = 0;
   private exoGroup!: Group;      private exoStar!: Mesh; private exoPlanet!: Mesh; private exoAngle = 0;
   private exoStarTrail!: Line;   private exoStarTrailPts: Vector3[] = [];
   private exoObserver!: Mesh; private exoBeam!: Line; private exoHalo!: Mesh; private exoLink!: Line;
@@ -1533,6 +1535,7 @@ export class World {
     this.tidePanel = el;
     this.tideLabel2D = el.querySelector('.tide2d-label')!;
     this.buildTideDiorama();
+    this.buildTideGraph();
 
     g.visible = false; this.scene.add(g);
     this.tideGroup = g;
@@ -1562,7 +1565,45 @@ export class World {
     // surface, raised/lowered each frame so the waterline climbs the beach.
     this.dioramaWater = new Mesh(new BoxGeometry(40, 20, 16), new MeshBasicMaterial({ color: 0x2f6fa6 }));
     this.dioramaWater.position.set(-9, -10, 0.5); s.add(this.dioramaWater); // y set in updateExtras
+    // Red marker riding the water surface (matches the graph's marker).
+    this.dioramaDot = new Mesh(new SphereGeometry(0.55, 14, 14), new MeshBasicMaterial({ color: 0xff3b30 }));
+    s.add(this.dioramaDot);
     this.dioramaScene = s;
+  }
+
+  /** Tide height at day d: lunar semidiurnal (period 12.42 h) + solar (12 h).
+   *  Their drift in and out of phase is the spring/neap beat (~14.8-day cycle).
+   *  Returned roughly in [-1, 1]. */
+  private tideHeight(d: number): number {
+    return (Math.cos(2 * Math.PI * d / 0.5175) + 0.46 * Math.cos(2 * Math.PI * d / 0.5)) / 1.46;
+  }
+
+  /** A tide-height-vs-time graph (0–30 days) with the spring/neap envelope and
+   *  a tracing red marker — the readout an observer would record. */
+  private buildTideGraph(): void {
+    const W = 470, H = 158, x0 = 34, x1 = W - 12, yMid = 86, amp = 52;
+    const px = (d: number) => x0 + (d / 30) * (x1 - x0);
+    const py = (h: number) => yMid - h * amp;
+    let path = '';
+    for (let i = 0; i <= 600; i++) { const d = (i / 600) * 30; path += (i ? 'L' : 'M') + px(d).toFixed(1) + ',' + py(this.tideHeight(d)).toFixed(1) + ' '; }
+    let grid = '';
+    for (let day = 0; day <= 30; day += 5) grid += `<line x1="${px(day).toFixed(1)}" y1="20" x2="${px(day).toFixed(1)}" y2="${H - 30}" stroke="rgba(120,150,200,0.18)" stroke-width="0.6"/>`;
+    grid += `<line x1="${x0}" y1="${yMid}" x2="${x1}" y2="${yMid}" stroke="rgba(120,150,200,0.3)" stroke-width="0.6"/>`;
+    let ticks = '';
+    for (const day of [0, 10, 20, 30]) ticks += `<text x="${px(day).toFixed(1)}" y="${H - 8}" fill="#6fa0e0" font-size="10" font-family="sans-serif" text-anchor="middle">${day} day</text>`;
+    const el = document.createElement('div');
+    el.className = 'tide-graph'; el.style.display = 'none';
+    el.innerHTML = `
+      <div class="tide-graph-title">Tide height over a month</div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+        ${grid}
+        <path d="${path}" fill="none" stroke="#eaf0ff" stroke-width="1.4"/>
+        ${ticks}
+        <circle class="tide-graph-dot" cx="${x0}" cy="${yMid}" r="5" fill="#ff3b30"/>
+      </svg>`;
+    document.body.appendChild(el);
+    this.tideGraph = el;
+    this.tideGraphDot = el.querySelector('.tide-graph-dot') as unknown as SVGCircleElement;
   }
 
   private buildExoplanet(): void {
@@ -2003,7 +2044,7 @@ export class World {
   }
   startTides(): void {
     this.beginExtra('tides');
-    this.tideMoonAngle = 0; this.tideSpin = 0;
+    this.tideMoonAngle = 0; this.tideSpin = 0; this.tideClock = 0;
     this.flyTo(new Vector3(0, 26, 13), new Vector3(0, 0, 0));
   }
   startExoplanet(): void {
@@ -2033,6 +2074,7 @@ export class World {
     this.exoGroup.visible = mode === 'exoplanet';
     this.resGroup.visible = mode === 'resonance';
     this.tidePanel.style.display = mode === 'tides' ? 'block' : 'none';
+    this.tideGraph.style.display = mode === 'tides' ? 'block' : 'none';
 
     // CSS2D labels are drawn by a separate renderer that doesn't inherit a
     // parent Group's visibility, so toggle each group's labels explicitly.
@@ -2156,11 +2198,18 @@ export class World {
       this.tideCityLabel.position.copy(top).add(cityDir.clone().multiplyScalar(1.0));
       const isHigh = Math.abs(cosA) > 0.5;
       (this.tideCityLabel.element as HTMLElement).textContent = isHigh ? 'High tide' : 'Low tide';
-      // Diorama inset: raise/lower the sea (box top) with the tide level. The
-      // box half-height is 10, so top = position.y + 10; map level → top ∈ [0,3].
-      const lvl = Math.abs(cosA);
-      this.dioramaWater.position.y = -10 + (0 + lvl * 3);
-      this.tideLabel2D.textContent = isHigh ? 'High tide' : 'Low tide';
+      // Realistic 30-day tide signal (spring/neap beat) drives the graph marker,
+      // the coastline water level, and the side-view red dot — all in sync.
+      if (!paused) { this.tideClock += dtReal * 0.9; if (this.tideClock > 30) this.tideClock = 0; }
+      const h = this.tideHeight(this.tideClock);       // ~[-1, 1]
+      const lvl = (h + 1) / 2;                          // 0 low … 1 high
+      this.dioramaWater.position.y = -10 + 0.3 + lvl * 2.7; // box top rises 0.3 → 3
+      this.dioramaDot.position.set(-2.5, this.dioramaWater.position.y + 10, 4);
+      this.tideLabel2D.textContent = h > 0.35 ? 'High tide' : h < -0.35 ? 'Low tide' : 'Mid tide';
+      // Graph marker traces the curve.
+      const gx = 34 + (this.tideClock / 30) * (458 - 34);
+      this.tideGraphDot.setAttribute('cx', gx.toFixed(1));
+      this.tideGraphDot.setAttribute('cy', (86 - h * 52).toFixed(1));
     } else if (mode === 'exoplanet') {
       if (!paused) this.exoAngle += dtReal * 0.8;
       const d = 9, mS = 1, mP = 0.12, rS = d * mP / (mS + mP), rP = d * mS / (mS + mP);

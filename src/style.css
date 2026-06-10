@@ -61,6 +61,20 @@ body { font-family: var(--sans); color: var(--text); font-weight: 400; -webkit-f
 }
 @media (max-width: 760px) { .tide-panel { width: 180px; height: 124px; bottom: auto; top: 40px; left: 10px; } }
 
+/* Tide-height-vs-time graph (tides slide only) — top-left. */
+.tide-graph {
+  position: fixed; left: 14px; top: 14px; z-index: 6;
+  width: 460px; padding: 8px 10px 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  backdrop-filter: blur(6px);
+}
+.tide-graph-title {
+  font-family: var(--mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 2px;
+}
+.tide-graph svg { width: 100%; height: auto; display: block; }
+@media (max-width: 760px) { .tide-graph { width: 280px; } }
+
 /* First-slide call-to-action: one tap starts music + narrated auto-play.
    Same visual language as the Back/Next buttons (uppercase, hairline, accent
    fill), just standalone and a touch larger. */
