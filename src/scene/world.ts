@@ -273,6 +273,7 @@ export class World {
   private dmGroup!: Group;       private dmStars: { mesh: Mesh; r: number; angle: number; obs: ArrowHelper; ghost: ArrowHelper }[] = [];
   private lagGroup!: Group;
   private tideGroup!: Group;     private tideEarth!: Mesh; private tideBulge!: Mesh; private tideMoonAngle = 0; private tideSpin = 0;
+  private tideCity!: Mesh; private tideColumn!: Line; private tideCityLabel!: CSS2DObject;
   private exoGroup!: Group;      private exoStar!: Mesh; private exoPlanet!: Mesh; private exoAngle = 0;
   private exoStarTrail!: Line;   private exoStarTrailPts: Vector3[] = [];
   private resGroup!: Group;      private resMoons: Mesh[] = []; private resAngle = 0;
@@ -1423,22 +1424,41 @@ export class World {
   private buildLagrange(): void {
     const g = new Group();
     const R = 14;
+    const earthPos = new Vector3(R, 0, 0);
     g.add(this.circleLine(R, 0x394056, 0.4)); // Earth's orbit
-    const sun = new Mesh(new SphereGeometry(2.0, 32, 32), new MeshStandardMaterial({ color: 0xffb056, emissive: 0xff7b22, emissiveIntensity: 0.9, roughness: 1 }));
+    // Same textured look as the main scene (self-illuminated so they read from
+    // the top-down view, where the Sun's point light sits inside them).
+    const sunTex = surfaceTexture('sun', 0xffb056);
+    const sun = new Mesh(new SphereGeometry(2.2, 40, 40),
+      new MeshStandardMaterial({ map: sunTex, emissiveMap: sunTex, emissive: 0xffffff, emissiveIntensity: 1.0, roughness: 1 }));
     g.add(sun);
-    const earth = new Mesh(new SphereGeometry(0.8, 24, 24), new MeshStandardMaterial({ color: 0x6fa8ff, emissive: 0x1f3f6b, emissiveIntensity: 0.5, roughness: 1 }));
-    earth.position.set(R, 0, 0); g.add(earth);
+    const eTex = surfaceTexture('earth', 0x3a6ea5);
+    const earth = new Mesh(new SphereGeometry(0.95, 32, 32),
+      new MeshStandardMaterial({ map: eTex, emissiveMap: eTex, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.95 }));
+    earth.position.copy(earthPos); g.add(earth);
     const pts: [string, number, number][] = [
       ['L1', R - 1.4, 0], ['L2', R + 1.4, 0], ['L3', -R, 0],
       ['L4', R * 0.5, R * 0.866], ['L5', R * 0.5, -R * 0.866],
     ];
     for (const [name, x, z] of pts) {
+      const p = new Vector3(x, 0, z);
       const m = new Mesh(new SphereGeometry(0.42, 16, 16), new MeshBasicMaterial({ color: 0x8affc0, blending: AdditiveBlending }));
-      m.position.set(x, 0, z); g.add(m);
+      m.position.copy(p); g.add(m);
       const l = this.makeLabel(name, 'vec-label'); l.position.set(x, 0, z + 1.4); g.add(l);
+      // The two pulls this point balances: Sun's gravity (toward the Sun) and
+      // Earth's gravity (toward Earth). Lengths ∝ GM/d², clamped to stay visible.
+      const dS = p.length(), dE = p.distanceTo(earthPos);
+      const sunLen = MathUtils.clamp(140 / (dS * dS), 0.9, 4.5);
+      const earthLen = MathUtils.clamp(7 / (dE * dE), 0.9, 4.5);
+      const toSun = new Vector3().subVectors(new Vector3(0, 0, 0), p).normalize();
+      const toEarth = new Vector3().subVectors(earthPos, p).normalize();
+      g.add(new ArrowHelper(toSun, p, sunLen, 0xffb04a, Math.min(0.7, sunLen * 0.4), 0.42));
+      g.add(new ArrowHelper(toEarth, p, earthLen, 0x6fb4ff, Math.min(0.7, earthLen * 0.4), 0.42));
     }
-    const sl = this.makeLabel('Sun', 'vec-label'); sl.position.set(0, 0, -3); g.add(sl);
+    const sl = this.makeLabel('Sun', 'vec-label'); sl.position.set(0, 0, -3.2); g.add(sl);
     const el = this.makeLabel('Earth', 'vec-label'); el.position.set(R, 0, -2); g.add(el);
+    const leg1 = this.makeLabel('→ Sun’s pull', 'vec-label'); leg1.position.set(-13, 0, 13); g.add(leg1);
+    const leg2 = this.makeLabel('→ Earth’s pull', 'vec-label'); leg2.position.set(-13, 0, 11); g.add(leg2);
     g.visible = false; this.scene.add(g);
     this.lagGroup = g;
   }
@@ -1450,17 +1470,28 @@ export class World {
     this.tideEarth = new Mesh(new SphereGeometry(eR, 40, 40),
       new MeshStandardMaterial({ map: eTex, emissiveMap: eTex, emissive: 0xffffff, emissiveIntensity: 0.5, roughness: 0.95 }));
     g.add(this.tideEarth);
-    // Water envelope, stretched along the Earth–Moon axis (X) into two bulges.
+    // Water envelope, stretched along the Earth–Moon axis (X) into two bulges
+    // (high tide) while staying at sea level across the sides (low tide).
     this.tideBulge = new Mesh(new SphereGeometry(eR, 40, 40),
-      new MeshBasicMaterial({ color: 0x4ea6ff, transparent: true, opacity: 0.25, blending: AdditiveBlending }));
-    this.tideBulge.scale.set(1.42, 0.92, 0.92);
+      new MeshBasicMaterial({ color: 0x4ea6ff, transparent: true, opacity: 0.28, blending: AdditiveBlending }));
+    this.tideBulge.scale.set(1.4, 1.0, 1.0);
     g.add(this.tideBulge);
     const moon = new Mesh(new SphereGeometry(0.9, 24, 24), new MeshStandardMaterial({ map: surfaceTexture('moon', 0x888888), roughness: 1 }));
     moon.position.set(13, 0, 0); g.add(moon);
-    const ml = this.makeLabel('Moon', 'vec-label'); ml.position.set(13, 0, 1.6); g.add(ml);
-    const a1 = new ArrowHelper(new Vector3(1, 0, 0), new Vector3(eR * 1.45, 0, 0), 2.2, 0x6ad6ff, 0.7, 0.4);
-    const a2 = new ArrowHelper(new Vector3(-1, 0, 0), new Vector3(-eR * 1.45, 0, 0), 2.2, 0x6ad6ff, 0.7, 0.4);
-    g.add(a1); g.add(a2);
+    const ml = this.makeLabel('Moon →', 'vec-label'); ml.position.set(13, 0, 1.6); g.add(ml);
+    // Static region labels: two high-tide bulges (along the Moon axis) and two
+    // low-tide points (perpendicular).
+    const rl = (t: string, x: number, z: number) => { const l = this.makeLabel(t, 'vec-label'); l.position.set(x, 0, z); g.add(l); };
+    rl('High tide', eR * 1.4 + 1.4, 0); rl('High tide', -(eR * 1.4 + 1.4), 0);
+    rl('Low tide', 0, eR + 1.2); rl('Low tide', 0, -(eR + 1.2));
+    // A "city" riding Earth's surface, with a water column whose height tracks
+    // the tide it's currently under — so one spin = two highs and two lows.
+    this.tideCity = new Mesh(new SphereGeometry(0.2, 12, 12), new MeshBasicMaterial({ color: 0xffd24a }));
+    g.add(this.tideCity);
+    this.tideColumn = new Line(new BufferGeometry().setFromPoints([new Vector3(), new Vector3()]),
+      new LineBasicMaterial({ color: 0x6ad6ff, transparent: true, opacity: 0.95 }));
+    g.add(this.tideColumn);
+    this.tideCityLabel = this.makeLabel('', 'vec-label'); g.add(this.tideCityLabel);
     g.visible = false; this.scene.add(g);
     this.tideGroup = g;
   }
@@ -1868,7 +1899,7 @@ export class World {
   startTides(): void {
     this.beginExtra('tides');
     this.tideMoonAngle = 0; this.tideSpin = 0;
-    this.flyTo(new Vector3(2, 12, 22), new Vector3(2, 0, 0));
+    this.flyTo(new Vector3(2, 19, 15), new Vector3(2, 0, 0));
   }
   startExoplanet(): void {
     this.beginExtra('exoplanet');
@@ -1970,9 +2001,23 @@ export class World {
         s.ghost.position.set(x, 0.05, z); s.ghost.setDirection(tang); s.ghost.setLength(vKep, 0.8, 0.45);
       }
     } else if (mode === 'tides') {
-      if (!paused) { this.tideSpin += dtReal * 0.8; }
+      if (!paused) this.tideSpin += dtReal * 0.55;
       this.tideEarth.rotation.y = this.tideSpin; // Earth spins inside the bulge
-      // Bulge stays aligned to the Moon (fixed at +X here).
+      // A city on the equator rotates with Earth; the water above it rises into
+      // the bulge twice per turn (high tide) and drops between (low tide).
+      const eR = 2.4, aX = eR * 1.4, bZ = eR; // bulge semi-axes (matches scale 1.4,1,1)
+      const phi = this.tideSpin;
+      const cx = Math.cos(phi), cz = Math.sin(phi);
+      const waterR = 1 / Math.sqrt((cx / aX) ** 2 + (cz / bZ) ** 2); // ellipse radius at this longitude
+      const base = new Vector3(cx, 0, cz).multiplyScalar(eR);
+      const top = new Vector3(cx, 0, cz).multiplyScalar(waterR);
+      this.tideCity.position.copy(base);
+      const arr = (this.tideColumn.geometry.getAttribute('position') as Float32BufferAttribute).array as Float32Array;
+      arr[0] = base.x; arr[1] = 0; arr[2] = base.z; arr[3] = top.x; arr[4] = 0; arr[5] = top.z;
+      (this.tideColumn.geometry.getAttribute('position') as Float32BufferAttribute).needsUpdate = true;
+      const high = Math.abs(cx) > 0.5; // near a bulge (Moon axis) → high tide
+      this.tideCityLabel.position.copy(top).add(new Vector3(cx, 0, cz).multiplyScalar(1.0));
+      (this.tideCityLabel.element as HTMLElement).textContent = high ? 'High tide' : 'Low tide';
     } else if (mode === 'exoplanet') {
       if (!paused) this.exoAngle += dtReal * 0.8;
       const d = 9, mS = 1, mP = 0.12, rS = d * mP / (mS + mP), rP = d * mS / (mS + mP);
